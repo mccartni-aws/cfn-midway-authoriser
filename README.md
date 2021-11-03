@@ -24,7 +24,7 @@ This repo contains an AWS Config rule that enforces cloud infrastructure best pr
 
 ## Soure Code
 
-- https://github.com/mccartni-aws/`<new-repo-here>`
+- `https://https://github.com/mccartni-aws/cfn-midway-authoriser`
 
 ## Deployment CLI Commands
 
