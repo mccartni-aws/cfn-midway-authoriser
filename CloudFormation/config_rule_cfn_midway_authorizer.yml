@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates an aws custom config rule that checks whether an API has a Midway authoriser associated with it. If it doesn't, an authoriser is created (if it doesn't already exist) and attached to all the resources associated with an API. 
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket where the Lambda Code is uploaded as a Zip file
+
+  S3KeyPrefixComplianceCheck:
+    Type: String
+    Description: S3 prefix path for Compliance Check Lambda function including the Zip file name
+    Default: Lambdas/check_midway_authorizer.py.zip
+
+  S3KeyPrefixRemediation:
+    Type: String
+    Description: S3 prefix path for remediation Lambda function including the Zip file name
+    Default: Lambdas/remediate_midway_authorizer.py.zip
+  
+  CFNLambdaExecutionRoleName:
+    Type: String
+    Description: Name of lambda function execution role, which will check compliance with CFN Midway authorizer Config rule.
+    Default: Cfn_apigw_authorizer_Config_Rule_Role
+
+  CFNLambdaExecutionPolicyName:
+    Type: String
+    Description: Name of lambda function policy, which will check compliance with CFN Midway authorizer Config rule.
+    Default: Cfn_apigw_authorizer_Config_Rule_Policy
+  
+  CfnMidwayAuthorizerComplianceCheckLambdaName: 
+    Type: String 
+    Description: Name of lambda function to check compliance with CFN Midway authorizer Config rule.
+    Default: CfnTemplate_APIGateway_ComplianceCheck_Lambda
+
+  CfnMidwayAuthorizerConfigRuleName: 
+    Type: String
+    Description: Name of AWS config rule that checks whether an API has an authorizer attached to it.
+    Default: CFN_Template_apigw_authorizer_Config_Rule
+  
+  CfnAPIGwAuthorizerLambdaName: 
+    Type: String 
+    Description: Name of lambda function to remediate APIGwAuthorizerConfigRule ConfigRule
+    Default: CfnTemplate_apigw_authorizer_Remediation_Lambda
+  
+  ProviderARNValue: 
+    Type: String 
+    Description: Name of the Cognito User Pool ARN
+  
+  RemediationSSMDocName: 
+    Type: String 
+    Description: Name of SSM document that invokes the CloudFormation API authorizer remediation function.
+    Default: CfnTemplate_apigw_authorizer_Remediation_SSMDocument
+
+  RemediationSSMDocumentAssumeRoleName: 
+    Type: String
+    Description: Name of SSM document role that invokes the CloudFormation API authorizer remediation function.
+    Default: CfnTemplate_apigw_authorizer_Remediation_SSM_Role
+
+Resources:
+  CFNLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref CFNLambdaExecutionRoleName
+      Tags:
+        - Key: Description
+          Value: !Sub Lambda role for compliance check and remediation - ${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: !Ref CFNLambdaExecutionPolicyName
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: logs:*
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - config:PutEvaluations
+                  - config:GetComplianceDetailsByConfigRule
+                  - iam:PassRole
+                  - apigateway:*
+                Resource: "*"
+
+  CfnMidwayAuthorizerComplianceCheck:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Function to check compliance with CfnTerminationProtectionConfigRule
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: !Ref S3KeyPrefixComplianceCheck
+      FunctionName: !Ref CfnMidwayAuthorizerComplianceCheckLambdaName
+      Role: !GetAtt CFNLambdaExecutionRole.Arn
+      Runtime: python3.8
+      Handler: check_midway_authorizer.lambda_handler
+      Timeout: 900 #seconds
+
+  ConfigPermissionToCallLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CfnMidwayAuthorizerComplianceCheck.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "config.amazonaws.com"
+      SourceAccount: !Ref "AWS::AccountId"
+
+  APIGwAuthorizerConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      ConfigRuleName: !Ref CfnMidwayAuthorizerConfigRuleName
+      Description: Checks that the RESTAPI has an authorizer in place. 
+      MaximumExecutionFrequency: TwentyFour_Hours #Allowed values: One_Hour | Six_Hours | Three_Hours | Twelve_Hours | TwentyFour_Hours
+      Source:
+        Owner: "CUSTOM_LAMBDA"
+        SourceDetails:
+          - EventSource: "aws.config"
+            MessageType: "ConfigurationItemChangeNotification"
+        SourceIdentifier: !GetAtt CfnMidwayAuthorizerComplianceCheck.Arn
+    DependsOn: ConfigPermissionToCallLambda
+
+  CfnAPIGwAuthorizerRemediation: 
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Function to remediate APIGwAuthorizerConfigRule ConfigRule
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: !Ref S3KeyPrefixRemediation
+      Environment: 
+        Variables:
+          PROVIDER_ARN: !Ref ProviderARNValue
+      FunctionName: !Ref CfnAPIGwAuthorizerLambdaName
+      Role: !GetAtt CFNLambdaExecutionRole.Arn
+      Runtime: python3.8
+      Handler: remediate_midway_authorizer.lambda_handler
+      Timeout: 30
+
+  RemediationSSMDoc:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: This document invokes the CloudFormation API Gateway Midway Authoriser remediation function.
+        assumeRole: "{{ AutomationAssumeRole }}"
+        schemaVersion: "0.3" #automation documents use this version
+        parameters:
+          ResourceId:
+            type: String
+            description: Name of non-compliant resource
+          AutomationAssumeRole:
+            type: String
+            description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+        mainSteps:
+          - name: invokeRemediationFunction
+            action: aws:invokeLambdaFunction
+            maxAttempts: 3
+            timeoutSeconds: 60
+            onFailure: Abort
+            inputs:
+              FunctionName: !Ref CfnAPIGwAuthorizerLambdaName
+              Payload: |-
+                {
+                  "ResourceId": "{{ ResourceId }}"
+                }
+      Name: !Ref RemediationSSMDocName
+
+
+  RemediationSSMDocumentAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - Ref: RemediationSSMDocumentAssumeRolePolicy
+      RoleName: !Ref RemediationSSMDocumentAssumeRoleName
+
+  RemediationSSMDocumentAssumeRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: lambda:InvokeFunction
+            Effect: Allow
+            Resource: !GetAtt "CfnAPIGwAuthorizerRemediation.Arn"
+
+  APIGwAuthorizerRemediationConfiguration:
+    Type: AWS::Config::RemediationConfiguration
+    Properties:
+      Automatic: True
+      ConfigRuleName: !Ref APIGwAuthorizerConfigRule
+      MaximumAutomaticAttempts: 10
+      RetryAttemptSeconds: 600
+      Parameters:
+        ResourceId:
+          ResourceValue:
+            Value: RESOURCE_ID
+        AutomationAssumeRole:
+          StaticValue:
+            Values:
+              - !GetAtt "RemediationSSMDocumentAssumeRole.Arn"
+      TargetId: !Ref RemediationSSMDocName
+      TargetType: SSM_DOCUMENT
+      TargetVersion: "1"
+    DependsOn: CfnAPIGwAuthorizerRemediation
+
+Outputs:
+  RemediationLambda:
+    Value: !Ref CfnAPIGwAuthorizerLambdaName
+  ComplianceCheckLambda: 
+    Value: !Ref CfnMidwayAuthorizerComplianceCheckLambdaName
+  RemediationSSMDoc:
+    Value: !Ref RemediationSSMDocName
