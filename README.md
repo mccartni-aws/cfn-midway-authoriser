@@ -34,4 +34,4 @@ This repo contains an AWS Config rule that enforces cloud infrastructure best pr
 
 **CloudFormation Termination Protection Remediation**
 
-> aws cloudformation create-stack --stack-name cfn-midway-authoriser-remediation --template-body file://CloudFormation/config_rule_cfn_midway_authorizer.yml --parameters ParameterKey=S3BucketName,ParameterValue=`<S3_BUCKET_NAME>` ParameterKey=ProviderARNValue, ParameterValue=`<COGNITO_USER_POOL_ARN>` --capabilities CAPABILITY_NAMED_IAM --enable-termination-protection
+> aws cloudformation create-stack --stack-name cfn-midway-authoriser-remediation --template-body file://CloudFormation/config_rule_cfn_midway_authorizer.yml --parameters ParameterKey=S3BucketName,ParameterValue=`<S3_BUCKET_NAME>` ParameterKey=ProviderARNValue, ParameterValue=`<COGNITO_USER_POOL_ARN>` --capabilities CAPABILITY_NAMED_IAM --enable-termination-protection# cfn-midway-authoriser
