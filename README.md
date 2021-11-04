@@ -22,9 +22,6 @@ This repo contains an AWS Config rule that enforces cloud infrastructure best pr
 - An account with one or more APIs residing in API Gateway.
 - An instantiated Cognito User Pool configured with Midway specific credentials. Make note of the Cognito User Pool ARN, as this will be passed in as a CloudFormation parameter to the `config_rule_cfn_midway_authorizer.yml` CloudFormation file at deployment time. 
 
-## Soure Code
-
-- `https://https://github.com/mccartni-aws/cfn-midway-authoriser`
 
 ## Deployment CLI Commands
 
